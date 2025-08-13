@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""
-Enhanced NSE Scraper with Corruption Detection and Graceful Error Handling
-Version: Enhanced Super Patient v2.0
 
-Key Features:
-1. 4 attempts for company page loading with progressive delays
-2. Enhanced ZIP corruption detection and handling
-3. Graceful handling of server-side corrupted files
-4. Detailed logging of corruption issues
-5. Saves metadata even for failed downloads
-6. Better content type detection
-7. Misnamed PDF file handling (PDFs with .zip extension)
-
-Author: AI Assistant
-Date: August 2025
-Version: Enhanced Super Patient v2.0
-"""
 
 import os
 import json
@@ -50,8 +34,8 @@ class EnhancedNSEScraper:
     """
     Enhanced NSE Scraper with corruption detection and graceful error handling
     """
-    
-    def __init__(self, base_output_dir: str = "nse_annual_reports_enhanced"):
+
+    def __init__(self, base_output_dir: str = "NSE_Annual_Reports"):
         """Initialize the Enhanced NSE Scraper."""
         self.base_url = "https://www.nseindia.com"
         self.annual_reports_url = f"{self.base_url}/companies-listing/corporate-filings-annual-reports"
@@ -89,6 +73,10 @@ class EnhancedNSEScraper:
         
         # Cache for companies
         self.companies_cache = None
+        
+        # Failed downloads tracking for retry
+        self.failed_downloads = []
+        self.failed_companies = []
         
         # Corruption tracking
         self.corruption_stats = {
@@ -145,7 +133,7 @@ class EnhancedNSEScraper:
             self.logger.warning(f"Session initialization warning: {e}")
     
     def extract_companies_from_csv(self) -> List[Dict[str, str]]:
-        """Extract company list from NSE's securities CSV file."""
+        """Extract company list from NSE's securities CSV file with proper column mapping."""
         if self.companies_cache:
             self.logger.info(f"Using cached companies: {len(self.companies_cache)} companies")
             return self.companies_cache
@@ -163,19 +151,67 @@ class EnhancedNSEScraper:
             csv_content = response.text
             csv_reader = csv.DictReader(io.StringIO(csv_content))
             
-            # Extract companies
+            # Log available columns for debugging
+            if csv_reader.fieldnames:
+                self.logger.info(f"CSV columns found: {csv_reader.fieldnames}")
+            
+            # Extract companies with proper mapping - check different possible column names
             for row in csv_reader:
                 symbol = row.get('SYMBOL', '').strip()
                 company_name = row.get('NAME OF COMPANY', '').strip()
+                face_value = row.get(' FACE VALUE', '').strip()
+                series = row.get(' SERIES', '').strip()
+                paid_up_value = row.get(' PAID UP VALUE', '').strip()
+                market_lot = row.get(' MARKET LOT', '').strip()
+                # Get ISIN number - exact column name from CSV
+                isin_number = row.get(' ISIN NUMBER', '').strip()
+                
+                # Get date of listing - exact column name from CSV  
+                date_of_listing = row.get(' DATE OF LISTING', '').strip()
                 
                 if symbol and company_name:
                     companies.append({
                         'ticker': symbol,
                         'company_name': company_name,
-                        'value': symbol
+                        'isin_number': isin_number,
+                        'date_of_listing': date_of_listing,
+                        'face_value': face_value,
+                        'series': series,
+                        'paid_up_value': paid_up_value,
+                        'market_lot': market_lot,
                     })
             
             self.logger.info(f"Successfully extracted {len(companies)} companies from CSV")
+            
+            # Log sample company to verify data extraction
+            if companies:
+                sample_company = companies[0]
+                self.logger.info(f"Sample company data: {sample_company}")
+                
+                # Count how many have ISIN and listing dates
+                isin_count = sum(1 for c in companies if c['isin_number'])
+                listing_count = sum(1 for c in companies if c['date_of_listing'])
+                self.logger.info(f"Companies with ISIN: {isin_count}/{len(companies)}")
+                self.logger.info(f"Companies with listing date: {listing_count}/{len(companies)}")
+                
+                # Debug: Show first few companies with data
+                companies_with_isin = [c for c in companies[:10] if c['isin_number']]
+                companies_with_listing = [c for c in companies[:10] if c['date_of_listing']]
+                
+                if companies_with_isin:
+                    self.logger.info(f"Sample company with ISIN: {companies_with_isin[0]}")
+                if companies_with_listing:
+                    self.logger.info(f"Sample company with listing date: {companies_with_listing[0]}")
+                
+                # Debug: Check if CSV columns are being read correctly
+                self.logger.info(f"CSV fieldnames: {csv_reader.fieldnames}")
+                
+                # Log a few raw rows to see the actual data
+                csv_content_lines = csv_content.split('\n')
+                if len(csv_content_lines) > 1:
+                    self.logger.info(f"CSV header: {csv_content_lines[0]}")
+                    self.logger.info(f"Sample CSV row: {csv_content_lines[1] if len(csv_content_lines) > 1 else 'No data'}")
+                    self.logger.info(f"Sample CSV row: {csv_content_lines[2] if len(csv_content_lines) > 2 else 'No second row'}")
             
             # Cache the results
             self.companies_cache = companies
@@ -195,14 +231,10 @@ class EnhancedNSEScraper:
     def _get_fallback_company_list(self) -> List[Dict[str, str]]:
         """Fallback list of major NSE companies."""
         return [
-            {'ticker': 'TCS', 'company_name': 'Tata Consultancy Services Limited', 'value': 'TCS'},
-            {'ticker': 'RELIANCE', 'company_name': 'Reliance Industries Limited', 'value': 'RELIANCE'},
-            {'ticker': '20MICRONS', 'company_name': '20 Microns Limited', 'value': '20MICRONS'},
-            {'ticker': '360ONE', 'company_name': '360 ONE WAM Limited', 'value': '360ONE'},
-            {'ticker': '3IINFOLTD', 'company_name': '3i Infotech Limited', 'value': '3IINFOLTD'},
-            {'ticker': '3MINDIA', 'company_name': '3M India Limited', 'value': '3MINDIA'},
-            {'ticker': 'AARTIIND', 'company_name': 'Aarti Industries Limited', 'value': 'AARTIIND'},
-            {'ticker': 'AARTIDRUGS', 'company_name': 'Aarti Drugs Limited', 'value': 'AARTIDRUGS'}
+            {'ticker': 'TCS', 'company_name': 'Tata Consultancy Services Limited', 'isin_number': '', 'date_of_listing': '', 'value': 'TCS'},
+            {'ticker': 'RELIANCE', 'company_name': 'Reliance Industries Limited', 'isin_number': '', 'date_of_listing': '', 'value': 'RELIANCE'},
+            {'ticker': '20MICRONS', 'company_name': '20 Microns Limited', 'isin_number': '', 'date_of_listing': '', 'value': '20MICRONS'},
+            {'ticker': '360ONE', 'company_name': '360 ONE WAM Limited', 'isin_number': '', 'date_of_listing': '', 'value': '360ONE'}
         ]
     
     def get_company_page_with_enhanced_patience(self, ticker: str) -> Optional[BeautifulSoup]:
@@ -237,8 +269,13 @@ class EnhancedNSEScraper:
                             time.sleep(self.company_retry_delay)
                             continue
                         else:
-                            # Last attempt - return what we have and log the issue
-                            self.logger.warning(f"📄 Returning page for {ticker} despite 0 reports (final attempt)")
+                            # Last attempt - add to failed companies list
+                            self.failed_companies.append({
+                                'ticker': ticker,
+                                'reason': 'no_reports_found',
+                                'attempts': self.company_retry_attempts
+                            })
+                            self.logger.warning(f"📄 Added {ticker} to failed companies list (no reports found)")
                             return soup
                 else:
                     self.logger.warning(f"⚠️ Page loaded but no annual reports content for {ticker} on attempt {attempt + 1}")
@@ -249,8 +286,13 @@ class EnhancedNSEScraper:
                         time.sleep(self.company_retry_delay)
                         continue
                     else:
-                        # Last attempt - return what we have
-                        self.logger.info(f"📄 Returning page content for {ticker} despite validation issues (final attempt)")
+                        # Last attempt - add to failed companies
+                        self.failed_companies.append({
+                            'ticker': ticker,
+                            'reason': 'invalid_content',
+                            'attempts': self.company_retry_attempts
+                        })
+                        self.logger.info(f"📄 Added {ticker} to failed companies list (invalid content)")
                         return soup
             else:
                 self.logger.error(f"❌ Failed to load page for {ticker} on attempt {attempt + 1}")
@@ -261,56 +303,14 @@ class EnhancedNSEScraper:
                     time.sleep(self.company_retry_delay)
                     continue
         
-        # All attempts failed
-        self.logger.error(f"❌ Failed to load page for {ticker} after {self.company_retry_attempts} attempts")
+        # All attempts failed - add to failed companies
+        self.failed_companies.append({
+            'ticker': ticker,
+            'reason': 'page_load_failed',
+            'attempts': self.company_retry_attempts
+        })
+        self.logger.error(f"❌ Failed to load page for {ticker} after {self.company_retry_attempts} attempts - added to failed list")
         return None
-    
-    def _quick_test_extraction(self, soup: BeautifulSoup, ticker: str) -> List[Dict]:
-        """Quick test to see if we can extract reports from the current page."""
-        try:
-            # Use the same extraction logic but don't log details
-            company = {'ticker': ticker, 'company_name': f'{ticker} Limited'}
-            
-            # Method 1: Quick table check
-            reports = []
-            tables = soup.find_all('table')
-            
-            for table in tables:
-                rows = table.find_all('tr')
-                if len(rows) < 2:
-                    continue
-                
-                # Look for any links in table rows
-                for row in rows[1:3]:  # Check first few rows only
-                    cells = row.find_all(['td', 'th'])
-                    for cell in cells:
-                        links = cell.find_all('a', href=True)
-                        for link in links:
-                            href = link.get('href', '')
-                            if self._is_valid_document_link(href, link.get_text()):
-                                # Found at least one valid document link
-                                reports.append({'url': href, 'ticker': ticker})
-                                if len(reports) >= 3:  # Found enough for testing
-                                    return reports
-            
-            # Method 2: Quick link check if no table results
-            if not reports:
-                all_links = soup.find_all('a', href=True)
-                for link in all_links[:20]:  # Check first 20 links only
-                    href = link.get('href', '')
-                    link_text = link.get_text().strip()
-                    if self._is_valid_document_link(href, link_text):
-                        combined_text = link_text.lower()
-                        if any(word in combined_text for word in ['annual', 'report', 'attachment']):
-                            reports.append({'url': href, 'ticker': ticker})
-                            if len(reports) >= 3:
-                                return reports
-            
-            return reports
-            
-        except Exception as e:
-            self.logger.debug(f"Quick test extraction error for {ticker}: {e}")
-            return []
     
     def _load_single_attempt_with_patience(self, ticker: str, attempt_num: int) -> Optional[BeautifulSoup]:
         """Load company page - single attempt with maximum patience and enhanced waiting."""
@@ -322,24 +322,16 @@ class EnhancedNSEScraper:
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--disable-software-rasterizer')
-            chrome_options.add_argument('--disable-background-timer-throttling')
-            chrome_options.add_argument('--disable-renderer-backgrounding')
-            chrome_options.add_argument('--disable-features=TranslateUI')
-            chrome_options.add_argument('--disable-ipc-flooding-protection')
-            chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-            chrome_options.add_argument('--disable-breakpad')
-            chrome_options.add_argument('--disable-component-extensions-with-background-pages')
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-            chrome_options.add_argument('--disable-default-apps')
-            chrome_options.add_argument('--mute-audio')
-            chrome_options.add_argument('--no-zygote')
-            chrome_options.add_argument('--disable-logging')
-            chrome_options.add_argument('--log-level=3')
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
             
+            # Reduce Chrome noise/warnings
+            chrome_options.add_argument('--disable-logging')
+            chrome_options.add_argument('--log-level=3')
+            chrome_options.add_argument('--silent')
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-web-security')
+            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
             chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
@@ -359,69 +351,25 @@ class EnhancedNSEScraper:
             # Enhanced waiting strategy for content detection
             wait = WebDriverWait(driver, self.selenium_timeout)
             
-            content_loaded = False
-            
-            # Strategy 1: Wait for any table with data
+            # Wait for table content
             try:
                 wait.until(EC.presence_of_element_located((By.XPATH, "//table")))
                 self.logger.debug(f"Table detected for {ticker}")
-                content_loaded = True
             except TimeoutException:
                 pass
-            
-            # Strategy 2: Wait for any corporate filing content
-            if not content_loaded:
-                try:
-                    wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'ATTACHMENT') or contains(text(), 'Annual') or contains(text(), 'Report')]")))
-                    self.logger.debug(f"Corporate content detected for {ticker}")
-                    content_loaded = True
-                except TimeoutException:
-                    pass
-            
-            # Strategy 3: Wait for any links
-            if not content_loaded:
-                try:
-                    wait.until(EC.presence_of_element_located((By.XPATH, "//a[@href]")))
-                    self.logger.debug(f"Links detected for {ticker}")
-                    content_loaded = True
-                except TimeoutException:
-                    pass
             
             # Progressive content wait
             content_wait = self.content_wait + (attempt_num * 2)  # 5, 7, 9, 11 seconds
             self.logger.debug(f"Content wait: {content_wait}s for attempt {attempt_num + 1}")
             time.sleep(content_wait)
             
-            # ENHANCED: Multiple scroll actions to trigger lazy loading
+            # Scroll to load dynamic content
             try:
-                # Scroll to bottom
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3)  # Increased wait after scroll
-                
-                # Scroll to top
+                time.sleep(2)
                 driver.execute_script("window.scrollTo(0, 0);")
                 time.sleep(2)
-                
-                # Scroll to middle
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-                time.sleep(2)
-                
-                # Final scroll to bottom
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3)
-                
-                # Back to top for extraction
-                driver.execute_script("window.scrollTo(0, 0);")
-                time.sleep(2)
-                
-                # ENHANCED: Try to trigger any AJAX calls by waiting for network idle
-                # Additional wait for dynamic content
-                additional_wait = 5 + (attempt_num * 2)  # 5, 7, 9, 11 seconds
-                self.logger.debug(f"Additional dynamic content wait: {additional_wait}s")
-                time.sleep(additional_wait)
-                
-            except Exception as scroll_error:
-                self.logger.debug(f"Scroll error for {ticker}: {scroll_error}")
+            except Exception:
                 pass
             
             # Get page source and parse
@@ -438,162 +386,76 @@ class EnhancedNSEScraper:
             if driver:
                 driver.quit()
     
+    def _quick_test_extraction(self, soup: BeautifulSoup, ticker: str) -> List[Dict]:
+        """Quick test to see if we can extract reports from the current page."""
+        try:
+            reports = []
+            tables = soup.find_all('table')
+            
+            for table in tables:
+                rows = table.find_all('tr')
+                if len(rows) < 2:
+                    continue
+                
+                # Look for any links in table rows
+                for row in rows[1:3]:  # Check first few rows only
+                    cells = row.find_all(['td', 'th'])
+                    for cell in cells:
+                        links = cell.find_all('a', href=True)
+                        for link in links:
+                            href = link.get('href', '')
+                            if self._is_valid_document_link(href, link.get_text()):
+                                reports.append({'url': href, 'ticker': ticker})
+                                if len(reports) >= 3:
+                                    return reports
+            
+            return reports
+            
+        except Exception as e:
+            self.logger.debug(f"Quick test extraction error for {ticker}: {e}")
+            return []
+    
     def _validate_company_page_content(self, soup: BeautifulSoup, ticker: str) -> bool:
         """Validate that the page has meaningful corporate filings content."""
         tables = soup.find_all('table')
         rows = soup.find_all('tr')
         links = soup.find_all('a', href=True)
-        pdf_links = [link for link in links if '.pdf' in link.get('href', '').lower()]
         
         # Look for text mentioning annual reports or attachments
         page_text = soup.get_text().lower()
         has_annual = 'annual' in page_text
-        has_report = 'report' in page_text
         has_attachment = 'attachment' in page_text
         has_filing = 'filing' in page_text
         
-        self.logger.debug(f"Content validation for {ticker}:")
-        self.logger.debug(f"  Tables: {len(tables)}, Rows: {len(rows)}, Links: {len(links)}, PDF links: {len(pdf_links)}")
-        self.logger.debug(f"  Keywords - Annual: {has_annual}, Report: {has_report}, Attachment: {has_attachment}, Filing: {has_filing}")
-        
         # Validation criteria
         has_meaningful_tables = len(tables) > 0 and len(rows) > 3
-        has_content_indicators = has_annual or has_report or has_attachment or has_filing
-        has_strong_indicators = has_attachment and (has_filing or has_annual)
+        has_content_indicators = has_annual or has_attachment or has_filing
         
-        is_valid = (
-            (has_meaningful_tables and has_content_indicators) or
-            (len(pdf_links) > 0 and has_content_indicators) or
-            has_strong_indicators or
-            len(tables) > 2
-        )
+        is_valid = (has_meaningful_tables and has_content_indicators) or len(tables) > 2
         
-        self.logger.debug(f"  Validation result: {is_valid}")
+        self.logger.debug(f"Validation for {ticker}: Tables={len(tables)}, Valid={is_valid}")
         return is_valid
     
     def extract_annual_reports(self, soup: BeautifulSoup, company: Dict[str, str]) -> List[Dict]:
-        """Extract annual reports from company page with enhanced debugging."""
+        """Extract annual reports from company page with enhanced filing date detection."""
         reports = []
         ticker = company['ticker']
         
         self.logger.info(f"📊 Extracting reports for {ticker}")
         
-        # ENHANCED DEBUG: Log page structure
-        self._debug_page_structure(soup, ticker)
-        
-        # Method 1: Look for tables with corporate filings structure
+        # Look for tables with corporate filings structure
         reports.extend(self._extract_from_corporate_tables(soup, company))
         
-        # Method 2: Look for any links that could be annual reports
+        # If no reports found, try alternative methods
         if not reports:
             self.logger.info(f"🔍 No table reports found for {ticker}, trying link extraction...")
             reports.extend(self._extract_from_any_links(soup, company))
         
-        # Method 3: Look for specific patterns in text
-        if not reports:
-            self.logger.info(f"🔍 No link reports found for {ticker}, trying text pattern extraction...")
-            reports.extend(self._extract_from_text_patterns(soup, company))
-        
-        # ENHANCED: If still no reports, do deeper analysis
-        if not reports:
-            self.logger.warning(f"🚨 No reports found for {ticker} - performing deep analysis...")
-            self._deep_analysis_for_missing_reports(soup, ticker)
-        
         self.logger.info(f"📋 Found {len(reports)} potential reports for {ticker}")
         return reports
     
-    def _debug_page_structure(self, soup: BeautifulSoup, ticker: str) -> None:
-        """Debug the page structure to understand why reports might not be found."""
-        try:
-            # Count basic elements
-            tables = soup.find_all('table')
-            rows = soup.find_all('tr')
-            links = soup.find_all('a', href=True)
-            
-            # Look for NSE-specific content
-            page_text = soup.get_text().lower()
-            has_attachment = 'attachment' in page_text
-            has_annual = 'annual' in page_text
-            has_report = 'report' in page_text
-            has_filing = 'filing' in page_text
-            
-            # Check for specific NSE indicators
-            nse_indicators = ['nsearchives', 'annual_reports', 'corporate filings']
-            has_nse_indicators = any(indicator in page_text for indicator in nse_indicators)
-            
-            self.logger.debug(f"Page structure for {ticker}:")
-            self.logger.debug(f"  Tables: {len(tables)}, Rows: {len(rows)}, Links: {len(links)}")
-            self.logger.debug(f"  Content indicators - Attachment: {has_attachment}, Annual: {has_annual}, Report: {has_report}, Filing: {has_filing}")
-            self.logger.debug(f"  NSE indicators: {has_nse_indicators}")
-            
-            # Log table structures
-            for i, table in enumerate(tables[:3]):  # First 3 tables only
-                table_rows = table.find_all('tr')
-                if table_rows:
-                    headers = []
-                    header_row = table_rows[0]
-                    header_cells = header_row.find_all(['th', 'td'])
-                    headers = [cell.get_text().strip() for cell in header_cells]
-                    self.logger.debug(f"  Table {i+1} headers: {headers[:5]}")  # First 5 headers
-                    
-                    # Check if table has links
-                    table_links = table.find_all('a', href=True)
-                    self.logger.debug(f"  Table {i+1} links: {len(table_links)}")
-            
-        except Exception as e:
-            self.logger.debug(f"Debug analysis error for {ticker}: {e}")
-    
-    def _deep_analysis_for_missing_reports(self, soup: BeautifulSoup, ticker: str) -> None:
-        """Perform deep analysis when no reports are found."""
-        try:
-            # Look for any PDF or ZIP links anywhere on the page
-            all_links = soup.find_all('a', href=True)
-            document_links = []
-            
-            for link in all_links:
-                href = link.get('href', '').lower()
-                text = link.get_text().strip()
-                
-                if any(ext in href for ext in ['.pdf', '.zip', 'download', 'attachment']):
-                    document_links.append({
-                        'href': href,
-                        'text': text,
-                        'parent_text': link.parent.get_text()[:100] if link.parent else ''
-                    })
-            
-            self.logger.debug(f"Found {len(document_links)} potential document links for {ticker}")
-            
-            if document_links:
-                for i, doc_link in enumerate(document_links[:5]):  # Show first 5
-                    self.logger.debug(f"  Doc link {i+1}: {doc_link['text']} -> {doc_link['href']}")
-            
-            # Look for form elements or AJAX indicators
-            forms = soup.find_all('form')
-            scripts = soup.find_all('script')
-            
-            self.logger.debug(f"Page has {len(forms)} forms and {len(scripts)} scripts")
-            
-            # Check for dynamic content indicators
-            page_source = str(soup)
-            dynamic_indicators = ['ajax', 'json', 'api', 'xhr', 'fetch']
-            has_dynamic = any(indicator in page_source.lower() for indicator in dynamic_indicators)
-            
-            if has_dynamic:
-                self.logger.debug(f"Page appears to have dynamic content - may need additional wait time")
-            
-            # Look for error messages
-            error_indicators = ['no data', 'not found', 'error', 'unavailable']
-            page_text_lower = soup.get_text().lower()
-            errors_found = [indicator for indicator in error_indicators if indicator in page_text_lower]
-            
-            if errors_found:
-                self.logger.warning(f"Possible error indicators found for {ticker}: {errors_found}")
-            
-        except Exception as e:
-            self.logger.debug(f"Deep analysis error for {ticker}: {e}")
-    
     def _extract_from_corporate_tables(self, soup: BeautifulSoup, company: Dict[str, str]) -> List[Dict]:
-        """Extract from standard corporate filings tables."""
+        """Extract from standard corporate filings tables with enhanced filing date detection."""
         reports = []
         ticker = company['ticker']
         
@@ -622,20 +484,20 @@ class EnhancedNSEScraper:
             from_year_col_idx = -1
             to_year_col_idx = -1
             submission_type_col_idx = -1
-            date_col_idx = -1
+            broadcast_date_col_idx = -1
             
             for i, header in enumerate(headers):
                 header = header.upper()
-                if 'ATTACHMENT' in header or 'DOCUMENT' in header or 'FILE' in header:
+                if 'ATTACHMENT' in header:
                     attachment_col_idx = i
-                elif 'FROM' in header and ('YEAR' in header or 'DATE' in header):
+                elif 'FROM' in header and 'YEAR' in header:
                     from_year_col_idx = i
-                elif 'TO' in header and ('YEAR' in header or 'DATE' in header):
+                elif 'TO' in header and 'YEAR' in header:
                     to_year_col_idx = i
-                elif 'TYPE' in header or 'CATEGORY' in header:
+                elif 'TYPE' in header or 'SUBMISSION' in header:
                     submission_type_col_idx = i
-                elif 'DATE' in header and 'FILING' in header:
-                    date_col_idx = i
+                elif 'BROADCAST' in header and 'DATE' in header:
+                    broadcast_date_col_idx = i
             
             # If no clear attachment column, look for any column with links
             if attachment_col_idx == -1:
@@ -645,7 +507,6 @@ class EnhancedNSEScraper:
                         links = cell.find_all('a', href=True)
                         if links:
                             attachment_col_idx = i
-                            self.logger.debug(f"Found links in column {i}")
                             break
                     if attachment_col_idx != -1:
                         break
@@ -662,6 +523,7 @@ class EnhancedNSEScraper:
                     from_year = ""
                     to_year = ""
                     submission_type = ""
+                    broadcast_date = ""
                     filing_date = ""
                     
                     if from_year_col_idx >= 0 and from_year_col_idx < len(cells):
@@ -670,8 +532,16 @@ class EnhancedNSEScraper:
                         to_year = cells[to_year_col_idx].get_text().strip()
                     if submission_type_col_idx >= 0 and submission_type_col_idx < len(cells):
                         submission_type = cells[submission_type_col_idx].get_text().strip()
-                    if date_col_idx >= 0 and date_col_idx < len(cells):
-                        filing_date = cells[date_col_idx].get_text().strip()
+                    if broadcast_date_col_idx >= 0 and broadcast_date_col_idx < len(cells):
+                        broadcast_date = cells[broadcast_date_col_idx].get_text().strip()
+                    
+                    # Extract filing date from broadcast date cell with hover content
+                    if broadcast_date_col_idx >= 0 and broadcast_date_col_idx < len(cells):
+                        broadcast_cell = cells[broadcast_date_col_idx]
+                        filing_date = self._extract_filing_date_from_cell(broadcast_cell)
+                        
+                        # Also get clean broadcast date (without hover content)
+                        broadcast_date = self._extract_clean_broadcast_date(broadcast_cell)
                     
                     # Find links in the row
                     pdf_links = []
@@ -711,13 +581,15 @@ class EnhancedNSEScraper:
                                 subject = self._create_subject(submission_type, link_text, financial_year)
                                 
                                 report = {
-                                    'date': self._parse_date(filing_date or to_year or from_year),
+                                    'filing_date': filing_date or "",  # Use extracted filing date or empty
                                     'ticker': ticker,
                                     'year': financial_year,
                                     'url': pdf_url,
                                     'subject': subject,
                                     'company_name': company['company_name'],
-                                    'filing_date_text': filing_date or to_year or from_year,
+                                    'isin_number': company.get('isin_number', ''),
+                                    'date_of_listing': company.get('date_of_listing', ''),
+                                    'broadcast_date': broadcast_date or "",
                                     'extraction_method': 'enhanced_table',
                                     'from_year': from_year,
                                     'to_year': to_year,
@@ -731,6 +603,142 @@ class EnhancedNSEScraper:
                     continue
         
         return reports
+    
+    def _extract_filing_date_from_cell(self, cell) -> str:
+        """Extract filing date from broadcast date cell, including hover table content."""
+        try:
+            # Method 1: Try to get the main link text first (most common case)
+            cell_links = cell.find_all('a')
+            for link in cell_links:
+                link_text = link.get_text().strip()
+                self.logger.debug(f"Checking link text: '{link_text}'")
+                # Look for date-like patterns in the link text
+                if self._is_valid_date_format(link_text):
+                    self.logger.debug(f"Found valid date in link: '{link_text}'")
+                    return link_text
+            
+            # Method 2: Look for hover table with exchange received time
+            hover_table = cell.find('div', class_='hover_table')
+            if hover_table:
+                self.logger.debug("Found hover table")
+                table_body = hover_table.find('tbody')
+                if table_body:
+                    rows = table_body.find_all('tr')
+                    for row in rows:
+                        cells = row.find_all('td')
+                        if len(cells) >= 1:
+                            # First cell should contain exchange received time
+                            exchange_time = cells[0].get_text().strip()
+                            self.logger.debug(f"Checking hover table cell: '{exchange_time}'")
+                            if exchange_time and self._is_valid_date_format(exchange_time):
+                                self.logger.debug(f"Found valid date in hover table: '{exchange_time}'")
+                                return exchange_time
+            
+            # Method 3: Try main cell text with basic cleaning
+            main_text = cell.get_text().strip()
+            self.logger.debug(f"Main cell text: '{main_text[:100]}...'")
+            
+            # Split by common separators and find the first valid date
+            separators = ['\n', '  ', 'Exchange', 'Received', 'Time', 'Dissemination']
+            text_parts = [main_text]
+            
+            for separator in separators:
+                new_parts = []
+                for part in text_parts:
+                    new_parts.extend(part.split(separator))
+                text_parts = new_parts
+            
+            # Check each part for valid dates
+            for part in text_parts:
+                cleaned_part = part.strip()
+                if cleaned_part and len(cleaned_part) > 5 and len(cleaned_part) < 50:  # Reasonable length
+                    if self._is_valid_date_format(cleaned_part):
+                        self.logger.debug(f"Found valid date in text parts: '{cleaned_part}'")
+                        return cleaned_part
+            
+            # Method 4: Extract date patterns using regex as last resort
+            import re
+            date_patterns = [
+                r'(\d{2}-[A-Z]{3}-\d{4}\s+\d{2}:\d{2}:\d{2})',  # DD-MON-YYYY HH:MM:SS
+                r'(\d{2}-[A-Z]{3}-\d{4})',                        # DD-MON-YYYY
+                r'(\d{2}/\d{2}/\d{4})',                           # DD/MM/YYYY
+                r'(\d{1,2}-\d{1,2}-\d{4})',                       # D-M-YYYY
+            ]
+            
+            for pattern in date_patterns:
+                matches = re.findall(pattern, main_text)
+                if matches:
+                    self.logger.debug(f"Found date via regex: '{matches[0]}'")
+                    return matches[0]
+            
+            self.logger.debug("No valid date found in cell")
+            return ""
+            
+        except Exception as e:
+            self.logger.debug(f"Error extracting filing date: {e}")
+            return ""
+    
+    def _extract_clean_broadcast_date(self, cell) -> str:
+        """Extract clean broadcast date from cell, avoiding hover content."""
+        try:
+            # Look for direct link text first (usually the clean date)
+            cell_links = cell.find_all('a')
+            for link in cell_links:
+                link_text = link.get_text().strip()
+                if self._is_valid_date_format(link_text):
+                    return link_text
+            
+            # If no links, try main text but clean it heavily
+            main_text = cell.get_text().strip()
+            
+            # Split by common separators and take the first valid date
+            possible_dates = main_text.split('-')
+            for possible_date in possible_dates:
+                cleaned = possible_date.strip()
+                if self._is_valid_date_format(cleaned) and len(cleaned) < 25:  # Reasonable date length
+                    return cleaned
+            
+            return ""
+            
+        except Exception as e:
+            self.logger.debug(f"Error extracting clean broadcast date: {e}")
+            return ""
+            
+        except Exception as e:
+            self.logger.debug(f"Error extracting filing date: {e}")
+            return ""
+    
+    def _is_valid_date_format(self, text: str) -> bool:
+        """Check if text looks like a valid date format."""
+        if not text or len(text) < 8:
+            return False
+        
+        # Remove common junk text first
+        text_upper = text.upper()
+        junk_words = ['EXCHANGE', 'RECEIVED', 'DISSEMINATION', 'TIME TAKEN', 'HOVER', 'TABLE', 'WIDTH', 'COLSPAN']
+        if any(junk in text_upper for junk in junk_words):
+            return False
+        
+        # Skip if it's obviously not a date (too many non-date characters)
+        if text.count('-') > 3 or text.count(':') > 3:
+            return False
+        
+        # Common date patterns
+        import re
+        date_patterns = [
+            r'\d{2}-[A-Z]{3}-\d{4}\s+\d{2}:\d{2}:\d{2}',  # DD-MON-YYYY HH:MM:SS
+            r'\d{2}-[A-Z]{3}-\d{4}',                        # DD-MON-YYYY
+            r'\d{2}/\d{2}/\d{4}',                           # DD/MM/YYYY
+            r'\d{4}-\d{2}-\d{2}',                           # YYYY-MM-DD
+            r'\d{1,2}-\d{1,2}-\d{4}',                       # D-M-YYYY or DD-MM-YYYY
+            r'\d{2}-\d{2}-\d{4}',                           # DD-MM-YYYY
+        ]
+        
+        for pattern in date_patterns:
+            if re.match(pattern, text.strip()):
+                return True
+        
+        return False
     
     def _extract_from_any_links(self, soup: BeautifulSoup, company: Dict[str, str]) -> List[Dict]:
         """Extract from any links that might be annual reports."""
@@ -765,13 +773,15 @@ class EnhancedNSEScraper:
                     subject = link_text if link_text else "Annual Report"
                     
                     report = {
-                        'date': 'unknown',
+                        'filing_date': '',  # No filing date available from links
                         'ticker': ticker,
                         'year': financial_year,
                         'url': pdf_url,
                         'subject': subject,
                         'company_name': company['company_name'],
-                        'filing_date_text': 'unknown',
+                        'isin_number': company.get('isin_number', ''),
+                        'date_of_listing': company.get('date_of_listing', ''),
+                        'broadcast_date': '',
                         'extraction_method': 'enhanced_links'
                     }
                     reports.append(report)
@@ -779,14 +789,10 @@ class EnhancedNSEScraper:
         
         return reports
     
-    def _extract_from_text_patterns(self, soup: BeautifulSoup, company: Dict[str, str]) -> List[Dict]:
-        """Extract from text patterns when no clear structure is found."""
-        reports = []
-        # Implementation for text pattern extraction if needed
-        return reports
-    
-    def download_pdf_with_enhanced_handling(self, url: str, file_path: Path) -> bool:
+    def download_pdf_with_enhanced_handling(self, report: Dict, file_path: Path) -> bool:
         """Download PDF with enhanced corruption detection and handling."""
+        url = report['url']
+        
         if file_path.exists():
             existing_size = file_path.stat().st_size
             if existing_size >= self.min_pdf_size:
@@ -824,9 +830,6 @@ class EnhancedNSEScraper:
                 
                 # Check response headers
                 content_type = response.headers.get('content-type', '').lower()
-                content_disposition = response.headers.get('content-disposition', '')
-                
-                self.logger.debug(f"Response headers - Content-Type: {content_type}, Content-Disposition: {content_disposition}")
                 
                 # Handle based on detected content type and URL
                 if 'zip' in content_type or url.lower().endswith('.zip'):
@@ -852,7 +855,16 @@ class EnhancedNSEScraper:
                     file_path.unlink()
                 
                 if attempt == self.download_retry_attempts - 1:
-                    self.logger.error(f"❌ Failed to download after {self.download_retry_attempts} attempts: {url}")
+                    # Add to failed downloads for retry
+                    failed_download = {
+                        'report': report,
+                        'file_path': str(file_path),
+                        'url': url,
+                        'reason': 'download_failed_after_retries',
+                        'attempts': self.download_retry_attempts
+                    }
+                    self.failed_downloads.append(failed_download)
+                    self.logger.error(f"❌ Failed to download after {self.download_retry_attempts} attempts: {url} - added to retry list")
                     return False
         
         return False
@@ -877,8 +889,6 @@ class EnhancedNSEScraper:
                 
                 temp_zip_path = temp_zip.name
             
-            self.logger.debug(f"Downloaded {total_size} bytes for ZIP analysis")
-            
             # Validate ZIP file size
             if total_size < 1000:
                 self.logger.warning(f"Downloaded ZIP too small ({total_size} bytes) on attempt {attempt + 1}")
@@ -886,50 +896,40 @@ class EnhancedNSEScraper:
             
             # Quick corruption check - validate ZIP signature
             if not content_sample.startswith(b'PK'):
-                # Check if it's actually a PDF or HTML error
+                # Check if it's actually a PDF
                 if content_sample.startswith(b'%PDF'):
                     self.logger.info(f"File with .zip extension is actually a PDF, saving directly")
                     self.corruption_stats['misnamed_pdfs'] += 1
                     return self._save_misnamed_pdf(temp_zip_path, file_path)
-                elif b'<html' in content_sample.lower() or b'<!doctype' in content_sample.lower():
+                elif b'<html' in content_sample.lower():
                     self.logger.error(f"Server returned HTML error page instead of ZIP file")
                     self.corruption_stats['server_errors'] += 1
-                    self._log_server_error(content_sample)
                     return False
                 else:
-                    self.logger.error(f"File doesn't have ZIP signature. First 50 bytes: {content_sample[:50]}")
+                    self.logger.error(f"File doesn't have ZIP signature")
                     self.corruption_stats['corrupted_zips'] += 1
                     return False
             
             # Try to validate ZIP file integrity before extraction
             corruption_status = self._check_zip_corruption(temp_zip_path)
             
-            if corruption_status == "corrupted":
-                self.logger.error(f"ZIP file is corrupted on server side (attempt {attempt + 1})")
-                self.corruption_stats['corrupted_zips'] += 1
-                self._log_corrupted_zip_info(temp_zip_path, file_path)
-                return False
-            elif corruption_status == "empty":
-                self.logger.error(f"ZIP file exists but contains no files (attempt {attempt + 1})")
-                self.corruption_stats['corrupted_zips'] += 1
-                return False
-            elif corruption_status == "no_pdf":
-                self.logger.error(f"ZIP file is valid but contains no PDF files (attempt {attempt + 1})")
-                return False
-            elif corruption_status != "valid":
-                self.logger.error(f"Unknown ZIP validation issue: {corruption_status}")
+            if corruption_status != "valid":
+                self.logger.error(f"ZIP file validation failed: {corruption_status}")
                 self.corruption_stats['corrupted_zips'] += 1
                 return False
             
-            # If we get here, ZIP appears valid - proceed with extraction
+            # Extract PDF from valid ZIP
             try:
                 with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
                     file_list = zip_ref.namelist()
                     pdf_files = [f for f in file_list if f.lower().endswith('.pdf')]
                     
+                    if not pdf_files:
+                        self.logger.error(f"No PDF files found in ZIP")
+                        return False
+                    
                     # Extract the first PDF
                     pdf_file = pdf_files[0]
-                    self.logger.debug(f"Extracting PDF: {pdf_file}")
                     
                     with zip_ref.open(pdf_file) as pdf_data:
                         pdf_content = pdf_data.read()
@@ -958,10 +958,6 @@ class EnhancedNSEScraper:
                             file_path.unlink()
                         return False
                         
-            except zipfile.BadZipFile as e:
-                self.logger.error(f"ZIP file format error: {e}")
-                self.corruption_stats['corrupted_zips'] += 1
-                return False
             except Exception as e:
                 self.logger.error(f"Error extracting from ZIP: {e}")
                 return False
@@ -998,18 +994,11 @@ class EnhancedNSEScraper:
                 if not pdf_files:
                     return "no_pdf"
                 
-                # Try to read info of first PDF to ensure it's accessible
-                pdf_file = pdf_files[0]
-                info = zip_ref.getinfo(pdf_file)
-                if info.file_size == 0:
-                    return "corrupted"
-                
                 return "valid"
                 
         except zipfile.BadZipFile:
             return "corrupted"
-        except Exception as e:
-            self.logger.debug(f"ZIP validation error: {e}")
+        except Exception:
             return "corrupted"
     
     def _save_misnamed_pdf(self, source_path: str, target_path: Path) -> bool:
@@ -1032,36 +1021,6 @@ class EnhancedNSEScraper:
         except Exception as e:
             self.logger.error(f"Error saving misnamed PDF: {e}")
             return False
-    
-    def _log_server_error(self, content_sample: bytes) -> None:
-        """Log server error content for debugging."""
-        try:
-            content_str = content_sample.decode('utf-8', errors='ignore')
-            # Extract error information from HTML
-            if 'error' in content_str.lower():
-                error_lines = [line.strip() for line in content_str.split('\n') 
-                              if 'error' in line.lower() or 'not found' in line.lower()]
-                if error_lines:
-                    self.logger.error(f"Server error details: {'; '.join(error_lines[:3])}")
-        except Exception:
-            pass
-    
-    def _log_corrupted_zip_info(self, zip_path: str, target_path: Path) -> None:
-        """Log information about corrupted ZIP file for reporting."""
-        try:
-            file_size = os.path.getsize(zip_path)
-            
-            # Create a corrupted files log
-            corrupted_log_path = self.base_output_dir / "corrupted_files.log"
-            
-            with open(corrupted_log_path, 'a', encoding='utf-8') as log_file:
-                timestamp = datetime.now().isoformat()
-                log_file.write(f"{timestamp}: CORRUPTED ZIP - Target: {target_path}, Size: {file_size} bytes\n")
-            
-            self.logger.warning(f"Logged corrupted ZIP to {corrupted_log_path}")
-            
-        except Exception as e:
-            self.logger.debug(f"Could not log corrupted ZIP info: {e}")
     
     def _save_direct_pdf_with_validation(self, response, file_path: Path, attempt: int) -> bool:
         """Save PDF directly from response with enhanced validation."""
@@ -1087,16 +1046,16 @@ class EnhancedNSEScraper:
                     self.logger.debug(f"Downloaded valid file: {file_path} ({file_size} bytes)")
                     return True
                 else:
-                    self.logger.warning(f"Saved file too small: {file_path} ({file_size} bytes) on attempt {attempt + 1}")
+                    self.logger.warning(f"Saved file too small: {file_path} ({file_size} bytes)")
                     if file_path.exists():
                         file_path.unlink()
                     return False
             else:
-                self.logger.warning(f"Downloaded content doesn't appear to be valid on attempt {attempt + 1}")
+                self.logger.warning(f"Downloaded content doesn't appear to be valid")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error saving PDF on attempt {attempt + 1}: {e}")
+            self.logger.error(f"Error saving PDF: {e}")
             if file_path.exists():
                 file_path.unlink()
             return False
@@ -1135,45 +1094,16 @@ class EnhancedNSEScraper:
             'annual audited results'
         ]
         
-        # Medium indicators
-        medium_indicators = [
-            'annual',
-            'yearly',
-            'year ended',
-            'financial year',
-            'fy'
-        ]
+        # Check for strong indicators
+        if any(indicator in text_lower for indicator in strong_annual_indicators):
+            return True
         
         # URL indicators
-        url_indicators = [
-            'annual_report',
-            'annual-report',
-            'annualreport',
-            '/ar_',
-            'nsearchives.nseindia.com'
-        ]
-        
-        # NSE specific patterns
-        nse_patterns = [
-            'attachment pdf',
-            'attachment zip',
-            'new',
-            'revised'
-        ]
-        
-        # Check for strong indicators
-        has_strong = any(indicator in text_lower for indicator in strong_annual_indicators)
-        if has_strong:
+        if any(indicator in url_lower for indicator in ['annual_report', 'annual-report', 'nsearchives.nseindia.com']):
             return True
         
-        # Check for URL indicators
-        has_url_indicator = any(indicator in url_lower for indicator in url_indicators)
-        if has_url_indicator:
-            return True
-        
-        # Check for year range (strong indicator for annual reports)
-        has_year_range = bool(re.search(r'\b(20\d{2})\s*[-–]\s*(20\d{2}|\d{2})\b', text))
-        if has_year_range:
+        # Check for year range
+        if bool(re.search(r'\b(20\d{2})\s*[-–]\s*(20\d{2}|\d{2})\b', text)):
             return True
         
         # Check for valid from/to years
@@ -1186,18 +1116,12 @@ class EnhancedNSEScraper:
             except ValueError:
                 pass
         
-        # Combination of medium indicators + NSE patterns
+        # Medium indicators + document type
+        medium_indicators = ['annual', 'yearly', 'year ended', 'financial year', 'fy']
         has_medium = any(indicator in text_lower for indicator in medium_indicators)
-        has_nse = any(pattern in text_lower for pattern in nse_patterns)
-        
-        if has_medium and has_nse:
-            return True
-        
-        # Last resort: if it's a PDF/ZIP and mentions annual or report
         is_document = any(ext in url_lower for ext in ['.pdf', '.zip'])
-        mentions_report = any(word in text_lower for word in ['annual', 'report', 'yearly'])
         
-        if is_document and mentions_report:
+        if has_medium and is_document:
             return True
         
         return False
@@ -1256,32 +1180,27 @@ class EnhancedNSEScraper:
         else:
             return f"Annual Report {financial_year}"
     
-    def _parse_date(self, date_text: str) -> str:
-        """Parse date from text with improved handling."""
-        if not date_text or date_text.strip() in ["unknown", "", "-"]:
-            return "unknown"
-        
-        date_text = date_text.strip()
-        
-        if len(date_text) == 4 and date_text.isdigit():
-            return f"{date_text}-03-31"
-        
-        return date_text
-    
     def save_metadata(self, report: Dict, file_path: Path) -> bool:
-        """Save report metadata with enhanced information."""
+        """Save report metadata with required fields only."""
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             
-            enhanced_report = report.copy()
-            enhanced_report.update({
-                'downloaded_at': datetime.now().isoformat(),
-                'scraper_version': 'Enhanced_v2.0',
-                'parsing_engine': 'Enhanced_Selenium_BeautifulSoup'
-            })
+            # Core required metadata fields only
+            metadata = {
+                'filing_date': report.get('filing_date', ''),  # Primary date field
+                'ticker': report['ticker'],
+                'year': report['year'],
+                'url': report['url'],
+                'subject': report.get('subject', f"Annual Report {report['year']}"),
+                'company_name': report['company_name'],
+                'isin_number': report.get('isin_number', ''),
+                'date_of_listing': report.get('date_of_listing', ''),
+                'from_year': report.get('from_year', ''),
+                'to_year': report.get('to_year', ''),
+            }
             
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(enhanced_report, f, indent=2, ensure_ascii=False)
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
             
             return True
             
@@ -1298,8 +1217,7 @@ class EnhancedNSEScraper:
             'metadata_saved': 0, 
             'errors': 0,
             'corrupted_files': 0,
-            'server_errors': 0,
-            'misnamed_pdfs': 0
+            'failed_downloads': 0
         }
         
         try:
@@ -1319,7 +1237,7 @@ class EnhancedNSEScraper:
                 self.logger.warning(f"No annual reports found for {ticker}")
                 return stats
             
-            # Process each report with enhanced handling
+            # Process each report
             for report in reports:
                 try:
                     year = report['year']
@@ -1335,7 +1253,6 @@ class EnhancedNSEScraper:
                         skipped_report = report.copy()
                         skipped_report['download_status'] = 'skipped'
                         skipped_report['skip_reason'] = 'invalid_url'
-                        skipped_report['downloaded_at'] = datetime.now().isoformat()
                         
                         if self.save_metadata(skipped_report, metadata_path):
                             stats['metadata_saved'] += 1
@@ -1349,21 +1266,20 @@ class EnhancedNSEScraper:
                     metadata_path = folder_path / "document_meta.json"
                     
                     # Download PDF with enhanced handling
-                    download_success = self.download_pdf_with_enhanced_handling(report['url'], pdf_path)
+                    download_success = self.download_pdf_with_enhanced_handling(report, pdf_path)
                     
                     if download_success:
                         stats['pdfs_downloaded'] += 1
                         # Save successful metadata
                         success_report = report.copy()
                         success_report['download_status'] = 'success'
-                        success_report['downloaded_at'] = datetime.now().isoformat()
                         success_report['file_size'] = pdf_path.stat().st_size if pdf_path.exists() else 0
                     else:
+                        stats['failed_downloads'] += 1
                         # Save failure metadata
                         success_report = report.copy()
                         success_report['download_status'] = 'failed'
                         success_report['failure_reason'] = 'download_failed_or_corrupted'
-                        success_report['downloaded_at'] = datetime.now().isoformat()
                         
                         # Check what type of failure this was
                         if '.zip' in report['url'].lower():
@@ -1383,8 +1299,82 @@ class EnhancedNSEScraper:
         
         return stats
     
+    def retry_failed_downloads(self) -> Dict[str, int]:
+        """Retry all failed downloads from the failed_downloads list."""
+        retry_stats = {
+            'retry_attempts': 0,
+            'retry_successes': 0,
+            'retry_failures': 0
+        }
+        
+        if not self.failed_downloads:
+            self.logger.info("No failed downloads to retry")
+            return retry_stats
+        
+        self.logger.info(f"🔄 Retrying {len(self.failed_downloads)} failed downloads...")
+        
+        # Create a copy of failed downloads to iterate over
+        failed_downloads_copy = self.failed_downloads.copy()
+        self.failed_downloads.clear()  # Clear the list for new failures
+        
+        for failed_item in failed_downloads_copy:
+            retry_stats['retry_attempts'] += 1
+            
+            report = failed_item['report']
+            file_path = Path(failed_item['file_path'])
+            
+            self.logger.info(f"🔄 Retrying download for {report['ticker']} {report['year']}")
+            
+            # Retry download with enhanced handling
+            success = self.download_pdf_with_enhanced_handling(report, file_path)
+            
+            if success:
+                retry_stats['retry_successes'] += 1
+                self.logger.info(f"✅ Retry successful for {report['ticker']} {report['year']}")
+                
+                # Update metadata with retry success
+                metadata_path = file_path.parent / "document_meta.json"
+                retry_report = report.copy()
+                retry_report['download_status'] = 'success_on_retry'
+                retry_report['file_size'] = file_path.stat().st_size if file_path.exists() else 0
+                self.save_metadata(retry_report, metadata_path)
+            else:
+                retry_stats['retry_failures'] += 1
+                self.logger.warning(f"❌ Retry failed for {report['ticker']} {report['year']}")
+                
+                # Update metadata with retry failure
+                metadata_path = file_path.parent / "document_meta.json"
+                retry_report = report.copy()
+                retry_report['download_status'] = 'failed_after_retry'
+                retry_report['failure_reason'] = 'download_failed_after_retry'
+                self.save_metadata(retry_report, metadata_path)
+        
+        return retry_stats
+    
+    def save_failed_items_report(self) -> None:
+        """Save a report of all failed companies and downloads for review."""
+        try:
+            failed_report = {
+                'generated_at': datetime.now().isoformat(),
+                'failed_companies': self.failed_companies,
+                'failed_downloads': self.failed_downloads,
+                'summary': {
+                    'total_failed_companies': len(self.failed_companies),
+                    'total_failed_downloads': len(self.failed_downloads)
+                }
+            }
+            
+            failed_report_path = self.base_output_dir / 'failed_items_report.json'
+            with open(failed_report_path, 'w', encoding='utf-8') as f:
+                json.dump(failed_report, f, indent=2, ensure_ascii=False)
+            
+            self.logger.info(f"📄 Saved failed items report to: {failed_report_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving failed items report: {e}")
+    
     def run_enhanced_scraping(self, max_companies: int = None) -> Dict[str, int]:
-        """Run the enhanced scraping process."""
+        """Run the enhanced scraping process with retry logic."""
         start_time = datetime.now()
         overall_stats = {
             'start_time': start_time.isoformat(),
@@ -1395,15 +1385,14 @@ class EnhancedNSEScraper:
             'metadata_saved': 0,
             'errors': 0,
             'corrupted_files': 0,
-            'server_errors': 0,
-            'misnamed_pdfs': 0
+            'failed_downloads': 0,
+            'retry_attempts': 0,
+            'retry_successes': 0,
+            'retry_failures': 0
         }
         
         try:
             self.logger.info("🚀 Starting Enhanced NSE Annual Reports Scraper")
-            self.logger.info(f"⏰ Settings - Company attempts: {self.company_retry_attempts}, Download attempts: {self.download_retry_attempts}")
-            self.logger.info(f"⏳ Wait times - Initial: {self.initial_wait}s, Content: {self.content_wait}s, Extraction: {self.extraction_wait}s")
-            self.logger.info("🔧 Enhanced features - Corruption detection, graceful error handling, detailed logging")
             
             # Extract companies from CSV
             companies = self.extract_companies_from_csv()
@@ -1418,7 +1407,7 @@ class EnhancedNSEScraper:
                 companies = companies[:max_companies]
                 self.logger.info(f"Processing limited set: {len(companies)} companies")
             
-            # Process each company with enhanced handling
+            # Process each company
             for i, company in enumerate(companies, 1):
                 ticker = company['ticker']
                 self.logger.info(f"🔄 Processing {i}/{len(companies)}: {ticker}")
@@ -1427,7 +1416,7 @@ class EnhancedNSEScraper:
                 company_stats = self.process_company_with_enhanced_handling(company)
                 
                 # Update overall stats
-                for key in ['reports_found', 'pdfs_downloaded', 'metadata_saved', 'errors', 'corrupted_files', 'server_errors', 'misnamed_pdfs']:
+                for key in ['reports_found', 'pdfs_downloaded', 'metadata_saved', 'errors', 'corrupted_files', 'failed_downloads']:
                     if key in company_stats:
                         overall_stats[key] += company_stats[key]
                 
@@ -1438,7 +1427,14 @@ class EnhancedNSEScraper:
                 if i % 5 == 0:
                     self.logger.info(f"📊 Progress: {i}/{len(companies)} companies processed")
                     self.logger.info(f"📈 Stats - Reports: {overall_stats['reports_found']}, Downloads: {overall_stats['pdfs_downloaded']}")
-                    self.logger.info(f"🚨 Issues - Corrupted: {self.corruption_stats['corrupted_zips']}, Server errors: {self.corruption_stats['server_errors']}")
+            
+            # Retry failed downloads
+            self.logger.info("🔄 Starting retry phase for failed downloads...")
+            retry_stats = self.retry_failed_downloads()
+            overall_stats.update(retry_stats)
+            
+            # Save failed items report
+            self.save_failed_items_report()
             
             # Final statistics
             end_time = datetime.now()
@@ -1482,12 +1478,21 @@ class EnhancedNSEScraper:
         print(f"  🔄 Misnamed PDFs (fixed): {stats.get('misnamed_pdfs', 0)}")
         print(f"  🌐 Server error pages: {stats.get('server_errors', 0)}")
         
+        # Retry statistics
+        print(f"\n🔄 RETRY STATISTICS:")
+        print(f"  🔄 Failed downloads: {stats.get('failed_downloads', 0)}")
+        print(f"  🔄 Retry attempts: {stats.get('retry_attempts', 0)}")
+        print(f"  ✅ Retry successes: {stats.get('retry_successes', 0)}")
+        print(f"  ❌ Retry failures: {stats.get('retry_failures', 0)}")
+        
         # Calculate success rates
         if stats.get('total_zip_attempts', 0) > 0:
             zip_success_rate = round((stats.get('successful_extractions', 0) / stats['total_zip_attempts']) * 100, 1)
-            corruption_rate = round((stats.get('corrupted_zips', 0) / stats['total_zip_attempts']) * 100, 1)
             print(f"  📈 ZIP success rate: {zip_success_rate}%")
-            print(f"  📉 ZIP corruption rate: {corruption_rate}%")
+        
+        if stats.get('retry_attempts', 0) > 0:
+            retry_success_rate = round((stats.get('retry_successes', 0) / stats['retry_attempts']) * 100, 1)
+            print(f"  📈 Retry success rate: {retry_success_rate}%")
         
         # Performance metrics
         duration_seconds = stats.get('duration_seconds', 0)
@@ -1511,16 +1516,17 @@ class EnhancedNSEScraper:
         print(f"\n📁 OUTPUT:")
         print(f"  📂 Output directory: {self.base_output_dir}")
         print(f"  📄 Main log: {self.base_output_dir / 'enhanced_scraper.log'}")
-        print(f"  🚨 Corruption log: {self.base_output_dir / 'corrupted_files.log'}")
+        print(f"  🚨 Failed items report: {self.base_output_dir / 'failed_items_report.json'}")
         
         print("\n🚀 ENHANCED FEATURES:")
         print("  ✅ Advanced corruption detection")
         print("  ✅ Graceful handling of server-side corrupted files")
         print("  ✅ Automatic misnamed PDF detection and fixing")
-        print("  ✅ Detailed failure analysis and logging")
+        print("  ✅ Failed downloads tracking and retry")
+        print("  ✅ Proper CSV data extraction (ticker, company_name, isin, date_of_listing)")
+        print("  ✅ Filing date extraction from page content")
         print("  ✅ Metadata saved even for failed downloads")
-        print("  ✅ Progressive retry delays")
-        print("  ✅ Enhanced content type detection")
+        print("  ✅ Comprehensive failed items reporting")
         print("="*70)
 
 
@@ -1532,10 +1538,10 @@ def test_enhanced_scraper():
     
     # Test companies that were having issues
     test_companies = [
-        {'ticker': '20MICRONS', 'company_name': '20 Microns Limited'},
-        {'ticker': 'AARTIIND', 'company_name': 'Aarti Industries Limited'},
-        {'ticker': 'AARTIDRUGS', 'company_name': 'Aarti Drugs Limited'},
-        {'ticker': '360ONE', 'company_name': '360 ONE WAM Limited'}
+        {'ticker': '20MICRONS', 'company_name': '20 Microns Limited', 'isin_number': '', 'date_of_listing': ''},
+        {'ticker': 'AARTIIND', 'company_name': 'Aarti Industries Limited', 'isin_number': '', 'date_of_listing': ''},
+        {'ticker': 'AARTIDRUGS', 'company_name': 'Aarti Drugs Limited', 'isin_number': '', 'date_of_listing': ''},
+        {'ticker': '360ONE', 'company_name': '360 ONE WAM Limited', 'isin_number': '', 'date_of_listing': ''}
     ]
     
     for company in test_companies:
@@ -1543,6 +1549,15 @@ def test_enhanced_scraper():
         stats = scraper.process_company_with_enhanced_handling(company)
         print(f"Results: {stats['reports_found']} reports found, {stats['pdfs_downloaded']} downloaded")
         print(f"Issues: Corrupted={stats['corrupted_files']}, Errors={stats['errors']}")
+    
+    # Test retry functionality
+    if scraper.failed_downloads:
+        print(f"\n--- Testing Retry Functionality ---")
+        retry_stats = scraper.retry_failed_downloads()
+        print(f"Retry results: {retry_stats['retry_successes']}/{retry_stats['retry_attempts']} successful")
+    
+    # Save failed items report
+    scraper.save_failed_items_report()
     
     print(f"\nCorruption Statistics:")
     print(f"  Corrupted ZIPs: {scraper.corruption_stats['corrupted_zips']}")
@@ -1553,17 +1568,93 @@ def test_enhanced_scraper():
     print("🧪 Enhanced test completed!")
 
 
+def test_csv_extraction():
+    """Test CSV extraction to debug the ISIN and date_of_listing issue."""
+    print("🧪 Testing CSV extraction...")
+    
+    import requests
+    import csv
+    import io
+    
+    try:
+        # Download CSV directly
+        url = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        # Parse CSV
+        csv_content = response.text
+        print(f"CSV content length: {len(csv_content)} characters")
+        
+        # Show first few lines
+        lines = csv_content.split('\n')
+        print(f"CSV header: {lines[0]}")
+        print(f"First data row: {lines[1] if len(lines) > 1 else 'No data'}")
+        print(f"Second data row: {lines[2] if len(lines) > 2 else 'No second row'}")
+        
+        # Parse with csv.DictReader
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+        
+        print(f"Original CSV fieldnames: {csv_reader.fieldnames}")
+        print(f"Fieldnames with quotes to show spaces: {[repr(name) for name in csv_reader.fieldnames]}")
+        
+        # Clean fieldnames
+        if csv_reader.fieldnames:
+            cleaned_fieldnames = [name.strip() for name in csv_reader.fieldnames]
+            csv_reader.fieldnames = cleaned_fieldnames
+            print(f"Cleaned CSV fieldnames: {cleaned_fieldnames}")
+        
+        # Check first few rows
+        for i, row in enumerate(csv_reader):
+            if i >= 3:  # Only check first 3 rows
+                break
+            
+            # Clean row data
+            cleaned_row = {}
+            for key, value in row.items():
+                cleaned_key = key.strip() if key else key
+                cleaned_value = value.strip() if value else value
+                cleaned_row[cleaned_key] = cleaned_value
+                
+            symbol = cleaned_row.get('SYMBOL', '').strip()
+            company_name = cleaned_row.get('NAME OF COMPANY', '').strip()
+            isin_number = cleaned_row.get('ISIN NUMBER', '').strip()
+            date_of_listing = cleaned_row.get('DATE OF LISTING', '').strip()
+            
+            print(f"\nRow {i+1}:")
+            print(f"  SYMBOL: '{symbol}'")
+            print(f"  NAME OF COMPANY: '{company_name}'")
+            print(f"  ISIN NUMBER: '{isin_number}'")
+            print(f"  DATE OF LISTING: '{date_of_listing}'")
+            
+            # Check raw row data with quotes to show spaces
+            print(f"  Raw row keys with quotes: {[repr(k) for k in row.keys()]}")
+            print(f"  Raw ISIN key check: {[k for k in row.keys() if 'ISIN' in k]}")
+            print(f"  Raw DATE key check: {[k for k in row.keys() if 'DATE' in k]}")
+        
+        print("🧪 CSV test completed!")
+        
+    except Exception as e:
+        print(f"❌ CSV test failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     """Main function for the enhanced scraper."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Enhanced NSE Scraper with Corruption Detection')
-    parser.add_argument('--output-dir', default='nse_annual_reports_enhanced',
+    parser = argparse.ArgumentParser(description='Enhanced NSE Scraper with Corruption Detection and Retry Logic')
+    parser.add_argument('--output-dir', default='NSE_Annual_Reports',
                        help='Output directory for scraped data')
     parser.add_argument('--max-companies', type=int,
                        help='Maximum number of companies to process')
     parser.add_argument('--test-enhanced', action='store_true',
                        help='Test enhanced logic with problematic companies')
+    parser.add_argument('--test-csv', action='store_true',
+                       help='Test CSV extraction to debug ISIN/date issues')
     parser.add_argument('--company-attempts', type=int, default=4,
                        help='Number of company page load attempts (default: 4)')
     parser.add_argument('--download-attempts', type=int, default=4,
@@ -1572,10 +1663,16 @@ def main():
                        help='Use even longer wait times for maximum patience')
     parser.add_argument('--skip-corrupted', action='store_true',
                        help='Skip known corrupted files faster (recommended)')
+    parser.add_argument('--retry-only', action='store_true',
+                       help='Only retry failed downloads from previous run')
     
     args = parser.parse_args()
     
-    # Handle test mode
+    # Handle test modes
+    if args.test_csv:
+        test_csv_extraction()
+        return
+        
     if args.test_enhanced:
         test_enhanced_scraper()
         return
@@ -1600,7 +1697,49 @@ def main():
             scraper.download_retry_attempts = 2  # Reduce retries for corrupted files
             print("⚡ Using SKIP CORRUPTED mode for faster processing")
         
-        print("🚀 Enhanced NSE Scraper - Advanced Corruption Detection & Handling")
+        # Retry only mode
+        if args.retry_only:
+            print("🔄 RETRY ONLY mode - Loading failed items from previous run...")
+            
+            # Try to load failed items from previous run
+            failed_report_path = scraper.base_output_dir / 'failed_items_report.json'
+            if failed_report_path.exists():
+                try:
+                    with open(failed_report_path, 'r', encoding='utf-8') as f:
+                        failed_report = json.load(f)
+                    
+                    scraper.failed_downloads = failed_report.get('failed_downloads', [])
+                    scraper.failed_companies = failed_report.get('failed_companies', [])
+                    
+                    print(f"📥 Loaded {len(scraper.failed_downloads)} failed downloads")
+                    print(f"📥 Loaded {len(scraper.failed_companies)} failed companies")
+                    
+                    # Retry failed downloads
+                    retry_stats = scraper.retry_failed_downloads()
+                    
+                    # Print retry summary
+                    print(f"\n🔄 RETRY SUMMARY:")
+                    print(f"  🔄 Retry attempts: {retry_stats['retry_attempts']}")
+                    print(f"  ✅ Retry successes: {retry_stats['retry_successes']}")
+                    print(f"  ❌ Retry failures: {retry_stats['retry_failures']}")
+                    
+                    if retry_stats['retry_attempts'] > 0:
+                        success_rate = round((retry_stats['retry_successes'] / retry_stats['retry_attempts']) * 100, 1)
+                        print(f"  📈 Retry success rate: {success_rate}%")
+                    
+                    # Save updated failed items report
+                    scraper.save_failed_items_report()
+                    
+                    return
+                    
+                except Exception as e:
+                    print(f"❌ Error loading failed items report: {e}")
+                    print("📋 Continuing with normal scraping...")
+            else:
+                print(f"📄 No failed items report found at {failed_report_path}")
+                print("📋 Continuing with normal scraping...")
+        
+        print("🚀 Enhanced NSE Scraper - Advanced Corruption Detection & Handling with Retry Logic")
         print(f"📁 Output directory: {scraper.base_output_dir}")
         print(f"🏢 Max companies: {args.max_companies or 'All'}")
         print(f"🔄 Company attempts: {scraper.company_retry_attempts}")
@@ -1610,10 +1749,11 @@ def main():
         print("  - Advanced ZIP corruption detection")
         print("  - Graceful handling of server-side corrupted files")
         print("  - Automatic misnamed PDF detection and fixing")
-        print("  - Detailed failure analysis and logging")
+        print("  - Failed downloads tracking and retry logic")
+        print("  - Proper CSV data extraction (ticker, company_name, isin, date_of_listing)")
+        print("  - Filing date extraction from page content")
         print("  - Metadata saved even for failed downloads")
-        print("  - Progressive retry delays")
-        print("  - Enhanced content type detection")
+        print("  - Comprehensive failed items reporting")
         print("  - Server error page detection")
         print()
         
@@ -1627,7 +1767,6 @@ def main():
         print("\n💡 RECOMMENDATIONS:")
         if stats.get('corrupted_zips', 0) > 0:
             print(f"  🚨 Found {stats['corrupted_zips']} corrupted ZIP files on NSE's server")
-            print("  📝 Check corrupted_files.log for details")
             print("  📧 Consider reporting to NSE for file integrity issues")
         
         if stats.get('server_errors', 0) > 0:
@@ -1637,6 +1776,15 @@ def main():
         if stats.get('misnamed_pdfs', 0) > 0:
             print(f"  🔄 Fixed {stats['misnamed_pdfs']} misnamed PDF files")
             print("  ✅ These were automatically handled")
+        
+        if stats.get('failed_downloads', 0) > 0:
+            print(f"  🔄 {stats['failed_downloads']} downloads failed initially")
+            if stats.get('retry_successes', 0) > 0:
+                print(f"  ✅ {stats['retry_successes']} recovered on retry")
+            if stats.get('retry_failures', 0) > 0:
+                print(f"  ❌ {stats['retry_failures']} still failed after retry")
+                print("  📄 Check failed_items_report.json for details")
+                print("  🔄 Use --retry-only flag to retry these specific failures")
         
         corruption_rate = 0
         if stats.get('total_zip_attempts', 0) > 0:
@@ -1649,6 +1797,12 @@ def main():
             print("  ⚠️  Moderate corruption rate - some files may be temporarily unavailable")
         else:
             print("  ✅ Low corruption rate - server files are mostly healthy")
+        
+        print(f"\n📄 NEXT STEPS:")
+        print(f"  1. Review failed_items_report.json for detailed failure analysis")
+        print(f"  2. Use --retry-only flag to retry specific failures")
+        print(f"  3. Check individual document_meta.json files for download status")
+        print(f"  4. Failed downloads are tracked for future retry attempts")
         
     except KeyboardInterrupt:
         print("\n⏹️  Scraping interrupted by user")
