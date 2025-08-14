@@ -189,25 +189,31 @@ NSE_Annual_Reports/
 ### Example Log Output
 
 ```
-2024-08-13 10:30:15 - INFO - Starting NSE Annual Reports Scraper
-2024-08-13 10:30:16 - INFO - Downloading NSE securities CSV...
-2024-08-13 10:30:18 - INFO - Successfully extracted 2156 companies from CSV
-2024-08-13 10:30:18 - INFO - Processing 1/2156: TCS
-2024-08-13 10:30:19 - INFO - Loading page for TCS (attempt 1)
-2024-08-13 10:30:25 - INFO - Extracting reports for TCS
-2024-08-13 10:30:25 - INFO - Found report: Annual Report for 2023-24
-2024-08-13 10:30:25 - INFO - Found report: Annual Report for 2022-23
-2024-08-13 10:30:26 - INFO - Downloading https://nsearchives.nseindia.com/corporate/TCS_25072024183015_Annual_Report_2023-24.zip (attempt 1)
-2024-08-13 10:30:28 - INFO - Successfully downloaded: nse_annual_reports/TCS/2023-24/document.pdf
+2025-08-15 01:02:34,067 - INFO - 🚀 Starting ULTIMATE NSE Scraper - Processing ALL companies
+2025-08-15 01:02:34,067 - INFO - 🥇 PRIMARY: Proven working method from test.py
+2025-08-15 01:02:34,067 - INFO - 🥈 FALLBACK: Enhanced multi-attempt method from nse.py
+2025-08-15 01:02:34,067 - INFO - 📝 FAILURE TRACKING: Creates retry log for failed companies
+2025-08-15 01:02:34,067 - INFO - 📥 Downloading NSE securities CSV...
+2025-08-15 01:02:34,939 - INFO - 📋 Available CSV columns: ['SYMBOL', 'NAME OF COMPANY', ' SERIES', ' DATE OF LISTING', ' PAID UP VALUE', ' MARKET LOT', ' ISIN NUMBER', ' FACE VALUE']
+2025-08-15 01:02:34,962 - INFO - ✅ Extracted 2137 companies from CSV with enhanced metadata
+2025-08-15 01:02:34,962 - INFO - 📋 Sample company data: {'ticker': '20MICRONS', 'company_name': '20 Microns Limited', 'isin_number': 'INE144J01027', 'date_of_listing': '06-OCT-2008', 'face_value': '5', 'series': 'EQ', 'paid_up_value': '5', 'market_lot': '1'}
+2025-08-15 01:02:34,980 - INFO - 💾 Saved complete companies list to: NSE_Annual_Reports/companies_list.json
+2025-08-15 01:02:34,980 - INFO - Processing ALL 2137 companies
+2025-08-15 01:02:34,980 - INFO - 📊 Processing 1/2137 (#1): 20MICRONS
+2025-08-15 01:02:34,980 - INFO - 🚀 Processing 20MICRONS with ULTIMATE dual-method approach...
+2025-08-15 01:02:34,980 - INFO - 🥇 Trying PRIMARY method for 20MICRONS...
+2025-08-15 01:02:45,567 - INFO - ✅ PRIMARY method successful for 20MICRONS: 16 reports
+2025-08-15 01:03:53,594 - INFO -   ✅ Success with PRIMARY method: 16 reports, 15 downloads
 ```
 
 ## Configuration
 
 ### Timing Configuration
 The scraper includes built-in delays to be respectful to the NSE servers:
-- **Request delay**: 1 second between requests
-- **Page load timeout**: 20 seconds
-- **Retry attempts**: 3 attempts for failed operations
+- **Request delay**: 2 second between requests
+- **Page load timeout**: 30 seconds for JavaScript content
+- **Download retries**: 3 attempts with progressive delays
+- **Company page retries**: 4 attempts (dual-method approach)
 
 ### File Validation
 - **Minimum PDF size**: 10KB (to filter out error pages)
