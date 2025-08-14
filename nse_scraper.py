@@ -410,7 +410,7 @@ class UltimateNSEScraper:
         wait = WebDriverWait(driver, self.primary_wait_for_table)
         
         try:
-            # Wait for the specific table 
+            # Wait for the specific table
             table_element = wait.until(EC.presence_of_element_located((By.ID, "CFannualreportEquityTable")))
             
             # Wait for table to have data
@@ -461,7 +461,7 @@ class UltimateNSEScraper:
                 all_rows = annual_table.find_all('tr')
                 rows = [row for row in all_rows if not row.find('th')]
             
-            # Extract data using  method with enhanced metadata
+            # Extract data using proven method with enhanced metadata
             for i, row in enumerate(rows, 1):
                 try:
                     cells = row.find_all(['td', 'th'])
@@ -497,7 +497,6 @@ class UltimateNSEScraper:
                                 'company_name': company_data.get('company_name', company_name),
                                 'isin_number': company_data.get('isin_number', ''),
                                 'date_of_listing': company_data.get('date_of_listing', '')
-                                # Additional fields for internal use
                                 
                             }
                             
